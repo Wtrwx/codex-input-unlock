@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-An **external runtime input unlocker** for the official Codex Desktop and ChatGPT Desktop applications on Windows.
+An **external runtime input unlocker** for the official Codex Desktop and ChatGPT Desktop applications on Windows and macOS.
 
 When a user has configured a **third-party API provider, relay, or self-hosted gateway**, the official desktop client may still disable the composer and send button if the signed-in official account has exhausted its quota. Codex Input Unlock uses Chrome DevTools Protocol (CDP) to install a dynamic, non-pausing conditional breakpoint that **removes this local frontend input and send gate**.
 
@@ -14,37 +14,48 @@ When a user has configured a **third-party API provider, relay, or self-hosted g
 
 ## Features
 
-- 🛡️ **No package modification:** Does not modify the Store Appx package, ASAR archive, or executable files. The official package and its signature remain untouched.
-- 🔒 **No configuration management:** Never modifies, overwrites, or synchronizes `~/.codex/config.toml` or `auth.json`. You remain responsible for your own configuration.
-- ⚡ **Non-pausing conditional breakpoint:** Uses a JavaScript comma expression such as `(quota = false, false)` to update the local variable while the breakpoint condition always evaluates to false, so the page never pauses.
-- 🔄 **Automatic recovery after reload:** Watches the renderer lifecycle and reinstalls the breakpoint after a page reload or `Ctrl + R`.
+- 🛡️ **No package modification:** Does not modify the Store Appx package, macOS `.app` bundle, ASAR archive, or executable files. The official package and its code signature remain untouched.
+- 🔒 **Zero configuration tampering:** Never modifies, overwrites, or synchronizes `~/.codex/config.toml` or `auth.json`. You remain in control of your own configuration.
+- ⚡ **Non-pausing conditional breakpoint:** Uses a JavaScript comma expression `(quota = false, false)` to update the local variable while the breakpoint condition always evaluates to false, so the page never pauses.
+- 🔄 **Automatic recovery after reload:** Watches the renderer lifecycle and reinstalls the breakpoint after a page reload (`Cmd + R` / `Ctrl + R`).
+- 🧩 **Adaptive across app updates:** Tolerates bundling variations across new Codex / ChatGPT releases (string literal quotes, variable declarations, multi-candidate quota atoms).
 
 ---
 
 ## How it works
 
 ```text
-PowerShell controller (codex-input-unlock.ps1)
-  ├─ Finds the official Store package (Codex / ChatGPT Desktop)
-  ├─ Allocates a random TCP port and starts the Node.js CDP supervisor
-  └─ Activates the client through COM with remote-debugging arguments
-                        │
-                        ▼
+Controller
+  ├─ Windows: PowerShell controller (codex-input-unlock.ps1)
+  │    ├─ Identifies official Store package (Codex / ChatGPT Desktop)
+  │    └─ Activates client with remote-debugging arguments via COM
+  └─ macOS: Shell controller (codex-input-unlock.sh)
+       ├─ Identifies /Applications (ChatGPT.app / Codex.app)
+       └─ Activates client with remote-debugging arguments via LaunchServices
+                         │
+                         ▼
 CDP supervisor (cdp-supervisor.mjs + quota-gate.cjs)
   ├─ Connects to the client renderer through CDP
   ├─ Locates the quota gate in the frontend JavaScript bundle
   ├─ Installs a conditional breakpoint: (quota = false, false)
   │    └─ Clears the local gate without pausing the renderer
-  └─ Reinstalls the injection after a page reload or Ctrl + R
+  └─ Reinstalls the injection after a page reload
 ```
 
 ---
 
 ## Requirements
 
-- **Operating system:** Windows 10 or Windows 11 (x64 / ARM64)
-- **Official client:** Microsoft Store version of Codex Desktop or ChatGPT Desktop
-- **Runtime dependencies:** PowerShell 7+ (`pwsh`) and Node.js 22+
+- **Operating system:**
+  - Windows 10 or Windows 11 (x64 / ARM64)
+  - macOS 12+ (Apple Silicon / Intel)
+- **Official client:**
+  - Windows: Microsoft Store version of Codex Desktop or ChatGPT Desktop
+  - macOS: `/Applications/ChatGPT.app` or `/Applications/Codex.app`
+- **Runtime dependencies:**
+  - Node.js 22+
+  - Windows: PowerShell 7+ (`pwsh`)
+  - macOS: Bash / Zsh (built into macOS)
 
 ---
 
@@ -60,34 +71,76 @@ If you want to retain your official Codex account login while using the third-pa
 requires_openai_auth = true
 ```
 
-You must also sign in to your Codex account in Codex Desktop before using the unlocker. The third-party provider, `requires_openai_auth = true`, and the Codex login state must already be configured. Codex Input Unlock only removes the local input and send gate caused by the official quota state; it does not replace provider setup or account login.
+You must also sign in to your account in the desktop client before using the unlocker. The third-party provider, `requires_openai_auth = true`, and the login state must already be configured. Codex Input Unlock only removes the local input and send gate caused by the official quota state; it does not replace provider setup or account login.
 
-### 1. Install
+---
 
-Open PowerShell 7 in the source directory and run:
+### macOS Quick Start
+
+#### 1. Install
+
+In the repository directory, run:
+
+```bash
+chmod +x ./codex-input-unlock.sh
+./codex-input-unlock.sh install
+```
+
+*Installation copies runtime files to `~/Library/Application Support/OpenAI/CodexInputUnlock`, creates a **Codex Input Unlock.app** application in `~/Applications`, and installs a symlink to `~/.local/bin/codex-input-unlock`.*
+
+#### 2. Launch
+
+> **Important:** Completely quit every running Codex Desktop or ChatGPT Desktop process before launching (via Cmd+Q). If either client is still running, the launcher will prompt you to quit it first.
+
+- **Option A (recommended):** Launch **`Codex Input Unlock`** from Spotlight or Applications.
+- **Option B (command line):**
+  ```bash
+  codex-input-unlock launch
+  # or directly:
+  "$HOME/Library/Application Support/OpenAI/CodexInputUnlock/codex-input-unlock.sh" launch
+  ```
+
+#### 3. Verify
+
+```bash
+codex-input-unlock verify
+```
+
+`runtimeReady: true` confirms the supervisor is active and the breakpoint is armed.
+
+#### macOS Commands
+
+| Action | Description |
+| :--- | :--- |
+| `./codex-input-unlock.sh diagnose` | Checks runtime dependencies, app path, and files |
+| `./codex-input-unlock.sh launch` | Starts supervisor and launches client with debugging flags |
+| `./codex-input-unlock.sh verify` | Checks supervisor process, CDP connectivity, and breakpoint status |
+| `./codex-input-unlock.sh inspect` | Outputs diagnostic JSON with recent logs |
+| `./codex-input-unlock.sh uninstall` | Stops supervisor and removes app shortcut and files |
+
+---
+
+### Windows Quick Start
+
+#### 1. Install
+
+In PowerShell 7:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File '.\codex-input-unlock.ps1' -Action Install
 ```
 
-Installation copies the required runtime files to `%LOCALAPPDATA%\OpenAI\CodexInputUnlock` and creates a **Codex Input Unlock** shortcut in the Windows Start menu.
+#### 2. Launch
 
-### 2. Launch
-
-> **Important:** Completely quit every running Codex Desktop or ChatGPT Desktop process before launching, including the system tray application. If either client is still running, the launcher will not terminate it. Instead, it displays an English error with the matching process information and keeps the shortcut window open until you press Enter.
-
-- **Option A (recommended):** Open the Start menu and select **Codex Input Unlock**.
+- **Option A (recommended):** Open Start menu and click **Codex Input Unlock**.
 - **Option B (command line):**
-
   ```powershell
   pwsh -NoProfile -ExecutionPolicy Bypass `
     -File "$env:LOCALAPPDATA\OpenAI\CodexInputUnlock\codex-input-unlock.ps1" `
     -Action Launch
   ```
 
-Launching from the original official shortcut does not include the required debugging arguments and therefore does not load the unlocker.
-
-### 3. Verify
+#### 3. Verify
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass `
@@ -95,51 +148,37 @@ pwsh -NoProfile -ExecutionPolicy Bypass `
   -Action Verify
 ```
 
-`RuntimeReady : True` means that the supervisor is alive, CDP is connected, and the breakpoint has been installed.
-
 ---
 
-## Commands
+## Upgrade Adaptation & Resilience
 
-The installed entry script is located at:
+Instead of patching binaries directly, this tool sets dynamic zero-pause CDP breakpoints at runtime, giving it high resilience across app updates:
 
-`$env:LOCALAPPDATA\OpenAI\CodexInputUnlock\codex-input-unlock.ps1`
-
-| Action | Description |
-| :--- | :--- |
-| `-Action Diagnose` | Checks runtime dependencies, the installed Store package, and required runtime files |
-| `-Action Verify` | Checks the supervisor process, CDP connection, and breakpoint readiness |
-| `-Action Inspect` | Prints detailed diagnostic JSON containing the listener, process, and recent logs |
-| `-Action Uninstall` | Stops the supervisor and removes the shortcut and runtime directory without touching user configuration or the official package |
-
-Common parameters:
-
-- `-NoShortcut`: Do not create a Start menu shortcut during installation.
-- `-DisableComputerUseBootstrap`: Do not write the Computer Use environment variable.
-- `-StartupTimeoutSeconds <seconds>`: Changes the startup timeout from the default of 60 seconds.
+1. **Quote & Bundler Flexibility:**
+   Tolerates single-quotes, double-quotes, and template literals generated by Vite / Rolldown / SWC.
+2. **Flexible Assignment Expressions:**
+   Matches `let`, `const`, and `var`, and locates the quota predicate variable even if terms in the `||` chain are reordered.
+3. **Multi-Candidate Evaluation:**
+   Scans all candidate quota atoms and selects the one that directly connects to `submitDisabled`.
+4. **Zero-Pause Side-Effect:**
+   Uses V8 debugger evaluation side-effects: `(quota = false, false)`. The expression clears the variable, while evaluating to `false` ensures the page is never suspended.
 
 ---
 
 ## Testing
 
-```powershell
-# Full static smoke test, including the configuration non-modification check
-pwsh -NoProfile -ExecutionPolicy Bypass -File '.\tests\smoke.ps1'
+```bash
+# macOS / Linux static smoke tests
+bash ./tests/smoke.sh
 
-# CI-friendly static test without requiring an installed Store package
+# Windows static smoke tests
 pwsh -NoProfile -ExecutionPolicy Bypass -File '.\tests\smoke.ps1' -SkipPackageCheck
 ```
-
----
-
-## Notes
-
-1. **A cold start through the dedicated launcher is required.** The original official shortcut does not provide the CDP arguments.
-2. **Only the local input gate is affected.** This tool does not fabricate server-side quota. Usage, authentication, and rate limits are controlled by your third-party provider.
-3. **Unofficial project:** This project is independent and is not affiliated with OpenAI.
 
 ---
 
 ## License
 
 [MIT](LICENSE)
+
+[LINUX DO](https://linux.do)

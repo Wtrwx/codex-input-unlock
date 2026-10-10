@@ -24,3 +24,18 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           pwsh -NoProfile -ExecutionPolicy Bypass -File '.\tests\smoke.ps1' -SkipPackageCheck
+
+  macos-smoke:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run macOS smoke tests
+        run: |
+          bash ./tests/smoke.sh --skip-app-check

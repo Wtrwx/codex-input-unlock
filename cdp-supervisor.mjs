@@ -82,6 +82,8 @@ function targetRank(target) {
   const url = String(target.url || "");
   if (url === "app://-/index.html") return 100;
   if (url.startsWith("app://")) return 80;
+  const title = String(target.title || "");
+  if (title === "ChatGPT" || title === "Codex") return 60;
   return -1;
 }
 
@@ -243,7 +245,7 @@ async function installScripts(session, combinedSource) {
 function isCandidateScriptUrl(value) {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === "app:" && parsed.pathname.endsWith(".js");
+    return (parsed.protocol === "app:" || parsed.protocol === "file:") && parsed.pathname.endsWith(".js");
   } catch {
     return false;
   }

@@ -41,13 +41,14 @@
 
   function locateLegacy(source, sourceUrl, atomVariable) {
     const localGatePattern = new RegExp(
-      `(${identifier})=${identifier}\\(${escapeRegex(atomVariable)}\\)&&(${identifier})===\\\`local\\\``,
+      `(${identifier})=${identifier}\\(${escapeRegex(atomVariable)}\\)&&(?:(${identifier})===['"\`]local['"\`]|['"\`]local['"\`]===(${identifier}))`,
       "g",
     );
     const localGates = [...source.matchAll(localGatePattern)];
     if (localGates.length !== 1) return null;
 
     const gate = localGates[0];
+    const host = gate[2] || gate[3];
     const tailOffset = gate.index + gate[0].length;
     const tail = source.slice(tailOffset, tailOffset + 18000);
     const assignment = new RegExp(
@@ -55,7 +56,7 @@
     ).exec(tail);
     if (!assignment || !tail.includes(`submitDisabled:${assignment[1]}`)) return null;
     const absoluteOffset = tailOffset + assignment.index + assignment[1].length + 1;
-    return sourceLocation(source, sourceUrl, absoluteOffset, gate[1], gate[2], "legacy-local-host");
+    return sourceLocation(source, sourceUrl, absoluteOffset, gate[1], host, "legacy-local-host");
   }
 
   function locateModern(source, sourceUrl, atomVariable) {
@@ -70,7 +71,7 @@
       if (!window.includes("submitDisabled:")) continue;
       if (!window.includes("rateLimitSendBlocked:")) continue;
       const propsPattern = new RegExp(
-        `rateLimitSendBlocked:(${identifier})\\|\\|${escapeRegex(quota)},rateLimitConversationSendBlocked:\\1(?:[,}])`,
+        `rateLimitSendBlocked\\s*:\\s*(${identifier})\\|\\|${escapeRegex(quota)}\\s*,\\s*rateLimitConversationSendBlocked\\s*:\\s*\\1(?:[,}])`,
       );
       const props = propsPattern.exec(window);
       if (!props) continue;
@@ -91,31 +92,34 @@
 
   function locateCodexLocalQuota(source, sourceUrl, atomVariable) {
     const consumerPattern = new RegExp(
-      `(${identifier})=${identifier}\\(${escapeRegex(atomVariable)}\\)&&(${identifier})===\\\`local\\\``,
+      `(${identifier})=${identifier}\\(${escapeRegex(atomVariable)}\\)&&(?:(${identifier})===['"\`]local['"\`]|['"\`]local['"\`]===(${identifier}))`,
       "g",
     );
     const candidates = [];
     for (const consumer of source.matchAll(consumerPattern)) {
       const quota = consumer[1];
-      const window = source.slice(consumer.index, consumer.index + 12000);
+      const host = consumer[2] || consumer[3];
+      const window = source.slice(consumer.index, consumer.index + 16000);
       const assignmentPattern = new RegExp(
-        `let (${identifier})=([^,;]{1,900}\\|\\|${escapeRegex(quota)}),(${identifier});`,
+        `(?:let|const|var)\\s+(${identifier})=([^,;]{1,900}?\\b${escapeRegex(quota)}\\b[^,;]{0,900}?)(?:,(${identifier}))?;`,
       );
       const assignment = assignmentPattern.exec(window);
       if (!assignment) continue;
-      if (!window.slice(assignment.index, assignment.index + 10000).includes(`submitDisabled:${assignment[1]}`)) continue;
+      if (!window.slice(assignment.index, assignment.index + 12000).includes(`submitDisabled:`)) continue;
       const absoluteStart = consumer.index + assignment.index;
-      const absoluteEnd = absoluteStart + assignment[0].lastIndexOf(`,${assignment[3]};`);
-      candidates.push({ consumer, absoluteStart, absoluteEnd });
+      const absoluteEnd = assignment[3]
+        ? absoluteStart + assignment[0].lastIndexOf(`,${assignment[3]};`)
+        : absoluteStart + assignment[0].length;
+      candidates.push({ consumer, quota, host, absoluteStart, absoluteEnd });
     }
-    if (candidates.length !== 1) return null;
+    if (candidates.length === 0) return null;
     const candidate = candidates[0];
     return sourceLocation(
       source,
       sourceUrl,
       candidate.absoluteStart,
-      candidate.consumer[1],
-      candidate.consumer[2],
+      candidate.quota,
+      candidate.host,
       "codex-local-quota",
       null,
       candidate.absoluteEnd,
@@ -127,14 +131,24 @@
     if (typeof sourceUrl !== "string" || sourceUrl.length === 0) return null;
 
     const atomPattern = new RegExp(
-      `(${identifier})=${identifier}\\(${identifier},\\(\\{get:${identifier}\\}\\)=>\\{[^}]{0,1400}?\\.authMethod!==\\\`chatgpt\\\`[^}]{0,1400}?\\.rate_limit\\?\\.allowed!==!1`,
+      `(${identifier})=${identifier}\\(${identifier},\\(\\{get:${identifier}\\}\\)=>\\{[^}]{0,1400}?\\.authMethod(?:!==|!=)['"\`]chatgpt['"\`][^}]{0,1400}?\\.rate_limit\\??\\.?allowed`,
       "g",
     );
-    const atoms = [...source.matchAll(atomPattern)];
-    if (atoms.length !== 1) return null;
-    return locateCodexLocalQuota(source, sourceUrl, atoms[0][1])
-      || locateLegacy(source, sourceUrl, atoms[0][1])
-      || locateModern(source, sourceUrl, atoms[0][1]);
+    let atoms = [...source.matchAll(atomPattern)];
+    if (atoms.length === 0) {
+      const fallbackAtomPattern = new RegExp(
+        `(${identifier})=[^;]{0,300}?\\.authMethod(?:!==|!=)['"\`]chatgpt['"\`][^}]{0,1400}?\\.rate_limit\\??\\.?allowed`,
+        "g",
+      );
+      atoms = [...source.matchAll(fallbackAtomPattern)];
+    }
+    for (const atom of atoms) {
+      const found = locateCodexLocalQuota(source, sourceUrl, atom[1])
+        || locateLegacy(source, sourceUrl, atom[1])
+        || locateModern(source, sourceUrl, atom[1]);
+      if (found) return found;
+    }
+    return null;
   }
 
   function condition(location) {
