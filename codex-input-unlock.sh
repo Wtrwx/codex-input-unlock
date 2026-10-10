@@ -14,6 +14,7 @@ DEBUG_PORT=0
 GUI_MODE=0
 DRY_RUN=0
 NO_SHORTCUT=0
+FORCE_RESTART=0
 
 STATE_DIR="${INSTALL_ROOT}/state"
 LOG_DIR="${INSTALL_ROOT}/logs"
@@ -115,13 +116,16 @@ get_running_processes() {
       if (spaceIdx === -1) continue;
       const pid = parseInt(trimmed.slice(0, spaceIdx), 10);
       const cmd = trimmed.slice(spaceIdx + 1).trim();
-      if (
-        (cmd.includes("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT") ||
-         cmd.includes("/Applications/Codex.app/Contents/MacOS/Codex") ||
-         cmd.includes("Codex Framework.framework")) &&
-        !cmd.includes("codex-input-unlock")
-      ) {
-        matches.push({ pid, command: cmd });
+      const isMainApp = (
+        (cmd.startsWith("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT") ||
+         cmd.startsWith("/Applications/Codex.app/Contents/MacOS/Codex") ||
+         cmd.startsWith(`${process.env.HOME}/Applications/ChatGPT.app/Contents/MacOS/ChatGPT`) ||
+         cmd.startsWith(`${process.env.HOME}/Applications/Codex.app/Contents/MacOS/Codex`)) &&
+        !cmd.includes("--type=")
+      );
+      if (isMainApp && !cmd.includes("codex-input-unlock")) {
+        const hasDebugPort = cmd.includes("--remote-debugging-port=");
+        matches.push({ pid, command: cmd, hasDebugPort });
       }
     }
     console.log(JSON.stringify(matches));
@@ -243,11 +247,11 @@ EOF
     rm -rf "$app_bundle"
     mkdir -p "${app_bundle}/Contents/MacOS" "${app_bundle}/Contents/Resources"
 
-    # Copy ChatGPT icon if available
-    if [[ -f "${app_path}/Contents/Resources/app.icns" ]]; then
-      cp -f "${app_path}/Contents/Resources/app.icns" "${app_bundle}/Contents/Resources/app.icns"
-    elif [[ -f "${app_path}/Contents/Resources/icon-chatgpt.icns" ]]; then
+    # Prioritize official ChatGPT squircle icon (icon-chatgpt.icns) over app.icns
+    if [[ -f "${app_path}/Contents/Resources/icon-chatgpt.icns" ]]; then
       cp -f "${app_path}/Contents/Resources/icon-chatgpt.icns" "${app_bundle}/Contents/Resources/app.icns"
+    elif [[ -f "${app_path}/Contents/Resources/app.icns" ]]; then
+      cp -f "${app_path}/Contents/Resources/app.icns" "${app_bundle}/Contents/Resources/app.icns"
     fi
 
     # Create Info.plist
@@ -350,12 +354,27 @@ action_launch() {
   local running_count
   running_count="$(node -e 'console.log(JSON.parse(process.argv[1]).length)' "$running_json")"
   if [[ "$running_count" -gt 0 ]]; then
-    local pids
-    pids="$(node -e 'console.log(JSON.parse(process.argv[1]).map(p => `PID ${p.pid}`).join(", "))' "$running_json")"
-    local error_msg="Launch blocked because Codex or ChatGPT Desktop is still running: ${pids}. Quit the application normally (Cmd+Q) and then launch Codex Input Unlock again. Codex Input Unlock did not close any running application."
-    show_gui_alert "ChatGPT Already Running" "$error_msg"
-    log_error "$error_msg"
-    exit 1
+    # Check if existing instance already has debug port active
+    local has_debug
+    has_debug="$(node -e 'console.log(JSON.parse(process.argv[1]).every(p => p.hasDebugPort))' "$running_json")"
+    if [[ "$has_debug" == "true" && "$FORCE_RESTART" -eq 0 ]]; then
+      log_info "ChatGPT is already running with Codex Input Unlock active. Bringing window to front..."
+      osascript -e 'tell application "ChatGPT" to activate' 2>/dev/null || open -a "$app_path"
+      exit 0
+    fi
+
+    if [[ "$FORCE_RESTART" -eq 1 ]]; then
+      log_info "Force restart requested. Terminating running instance..."
+      node -e 'JSON.parse(process.argv[1]).forEach(p => { try { process.kill(p.pid, "SIGTERM"); } catch {} });' "$running_json"
+      sleep 1.5
+    else
+      local pids
+      pids="$(node -e 'console.log(JSON.parse(process.argv[1]).map(p => `PID ${p.pid}`).join(", "))' "$running_json")"
+      local error_msg="ChatGPT is already running (PID: ${pids}). Please quit ChatGPT (Cmd+Q) first, or pass --force to restart it."
+      show_gui_alert "ChatGPT Already Running" "$error_msg"
+      log_error "$error_msg"
+      exit 1
+    fi
   fi
 
   local port="$DEBUG_PORT"
@@ -630,6 +649,10 @@ main() {
         ;;
       --gui)
         GUI_MODE=1
+        shift
+        ;;
+      -Force|--force|-f)
+        FORCE_RESTART=1
         shift
         ;;
       Diagnose|diagnose|Install|install|Launch|launch|Verify|verify|Inspect|inspect|Uninstall|uninstall)
