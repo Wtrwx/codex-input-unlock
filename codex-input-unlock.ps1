@@ -191,12 +191,36 @@ function Quote-WindowsArgument([string]$Value) {
   return '"' + ([regex]::Replace($Value, '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
 }
 
+function Test-StablePwshPath {
+  param([string]$Path)
+  # WindowsApps 下的包目录名形如 Microsoft.PowerShell_7.6.7.0_x64__8wekyb3d8bbwe，带版本号的那一段会随
+  # Store 包升级改名，写进快捷方式等于埋雷；包家族名目录 (Microsoft.PowerShell_8wekyb3d8bbwe) 与应用执行
+  # 别名 (WindowsApps\pwsh.exe) 都不含版本号，可以安全写进快捷方式。
+  if ([string]::IsNullOrEmpty($Path)) { return $false }
+  return $Path -notmatch '\\WindowsApps\\[^\\]+_\d+(?:\.\d+)+_[^\\]*'
+}
+
+function Resolve-PwshExecutable {
+  # 顺序即优先级：MSI 固定位置 → Store 包家族名目录 → Store 应用执行别名 → PATH 上的 pwsh（仍须通过稳定性检查）。
+  $candidates = @(
+    (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\Microsoft.PowerShell_8wekyb3d8bbwe\pwsh.exe')
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe')
+  )
+  $command = Get-Command pwsh -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($command -and $command.Source) { $candidates += $command.Source }
+  foreach ($candidate in $candidates) {
+    if ((Test-StablePwshPath $candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
+  }
+  throw 'No stable PowerShell 7 found. Install PowerShell 7 from the MSI package or the Microsoft Store, then re-run Install.'
+}
+
 function New-Shortcut([string]$ControllerPath) {
   $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
   $shortcutPath = Join-Path $startMenu 'Codex Input Unlock.lnk'
   $shell = New-Object -ComObject WScript.Shell
   $shortcut = $shell.CreateShortcut($shortcutPath)
-  $shortcut.TargetPath = (Get-Command pwsh -ErrorAction Stop).Source
+  $shortcut.TargetPath = Resolve-PwshExecutable
   $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$ControllerPath`" -Action Launch -PauseOnError"
   $shortcut.WorkingDirectory = Split-Path -Parent $ControllerPath
   $shortcut.Description = 'Launch official Codex with input unlocked for third-party providers'
@@ -207,6 +231,7 @@ function New-Shortcut([string]$ControllerPath) {
 function Invoke-Diagnose {
   $package = Resolve-CodexPackage
   $node = Get-Command node -ErrorAction SilentlyContinue | Select-Object -First 1
+  $pwsh = try { Resolve-PwshExecutable } catch { $null }
   $activatorReady = $false
   try { Ensure-ActivationType; $activatorReady = $true } catch { $activatorReady = $false }
   $state = Read-JsonFile $script:StatePath
@@ -216,6 +241,8 @@ function Invoke-Diagnose {
     Package = $package
     RunningPackageProcesses = @(Get-CodexPackageProcesses $package)
     Node = if ($node) { $node.Source } else { $null }
+    Pwsh = if ($pwsh) { $pwsh } else { $null }
+    PwshUsable = $null -ne $pwsh
     ActivatorReady = $activatorReady
     Installed = $installed
     MissingRuntimeFiles = @($requiredRuntime | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
@@ -349,7 +376,18 @@ function Invoke-Launch {
       if ($supervisor.HasExited) { throw "Supervisor exited with code $($supervisor.ExitCode). See $stderrPath" }
       Start-Sleep -Milliseconds 250
     }
-    if (-not $runtime -or $runtime.state -ne 'ready') { throw "Codex Input Unlock did not become ready within $StartupTimeoutSeconds seconds." }
+    if (-not $runtime -or $runtime.state -ne 'ready') {
+      $detail = $null
+      if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+        try { $final = Read-JsonFile $statusPath } catch { $final = $null }
+        if ($final) {
+          if ($final.state -eq 'failed' -and $final.error) { throw "Supervisor failed: $($final.error)" }
+          if ($final.lastError) { $detail = " Last state: $($final.state). Last error: $($final.lastError)" }
+          elseif ($final.state) { $detail = " Last state: $($final.state)." }
+        }
+      }
+      throw "Codex Input Unlock did not become ready within $StartupTimeoutSeconds seconds.$detail"
+    }
 
     $state = Read-JsonFile $script:StatePath
     if (-not $state) { $state = [pscustomobject]@{} }
@@ -393,7 +431,14 @@ function Invoke-Verify {
   }
   $runtimeFresh = $false
   if ($runtime -and $runtime.updatedAt) {
-    try { $runtimeFresh = ((Get-Date).ToUniversalTime() - [datetime]::Parse([string]$runtime.updatedAt).ToUniversalTime()).TotalSeconds -lt 10 } catch { $runtimeFresh = $false }
+    try {
+      $updatedAt = if ($runtime.updatedAt -is [datetime]) {
+        $runtime.updatedAt.ToUniversalTime()
+      } else {
+        [datetime]::Parse([string]$runtime.updatedAt).ToUniversalTime()
+      }
+      $runtimeFresh = ((Get-Date).ToUniversalTime() - $updatedAt).TotalSeconds -lt 10
+    } catch { $runtimeFresh = $false }
   }
   $runtimeReady = $runtime -and $runtime.state -eq 'ready' -and $runtimeFresh -and $supervisorAlive -and $cdpListening -and $cdpResponding
   [pscustomobject]@{
