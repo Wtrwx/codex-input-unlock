@@ -65,28 +65,29 @@ requires_openai_auth = true
 
 #### 1. 安装
 
-在源码目录下执行：
+克隆仓库并在目录下执行：
 
 ```bash
+git clone https://github.com/Wtrwx/codex-input-unlock.git
+cd codex-input-unlock
 chmod +x ./codex-input-unlock.sh
 ./codex-input-unlock.sh install
 ```
 
-*安装会将必要运行文件复制至 `~/Library/Application Support/OpenAI/CodexInputUnlock`，并在 `~/Applications` 生成 **`Codex Input Unlock.app`** 应用程序，同时在 `~/.local/bin` 生成命令行软链接。*
+*安装会将必要运行文件复制至 `~/Library/Application Support/OpenAI/CodexInputUnlock`，并在 `~/Applications` 生成带官方圆角图标的 **`Codex Input Unlock.app`** 应用程序，同时在 `~/.local/bin` 生成命令行软链接 `codex-input-unlock`。*
 
 #### 2. 启动
 
-> **注意**：启动前请**完全退出**正在运行的 Codex Desktop 或 ChatGPT Desktop（通过 Cmd+Q 或菜单完全退出）。如果检测到任一客户端仍在运行，启动器不会关闭它，而会提示关闭后重试。
-
-- **方式 A（推荐）**：使用 Spotlight (聚焦搜索) 或启动台 / 应用程序文件夹，直接打开 **`Codex Input Unlock`**。
+- **方式 A（推荐）**：使用 Spotlight (聚焦搜索) 或访达 `~/Applications`，直接打开 **`Codex Input Unlock`**。
+  - 如果客户端尚未运行：自动启动带调试端口的客户端并挂载解锁断点。
+  - 如果客户端已通过解锁器启动且正在运行：直接将客户端窗口唤起到前台，不会重复报错。
+  - 如果检测到未带调试端口的普通客户端正在运行：会弹窗提示先完全退出（`Cmd+Q`）后重试。
 - **方式 B（命令行）**：
   ```bash
   codex-input-unlock launch
-  # 或直接执行：
-  "$HOME/Library/Application Support/OpenAI/CodexInputUnlock/codex-input-unlock.sh" launch
+  # 如需强制重启正在运行的普通客户端并解锁：
+  codex-input-unlock launch --force
   ```
-
-*注：直接点击官方原生图标启动不带调试参数，不会加载解锁逻辑。*
 
 #### 3. 验证状态
 
@@ -101,7 +102,7 @@ codex-input-unlock verify
 | 命令 | 说明 |
 | :--- | :--- |
 | `./codex-input-unlock.sh diagnose` | 诊断环境依赖、已安装应用状态与文件完整性 |
-| `./codex-input-unlock.sh launch` | 启动守护进程并唤起带调试参数的客户端 |
+| `./codex-input-unlock.sh launch [--force]` | 启动守护进程并唤起带调试参数的客户端（`--force` 可自动重启运行中的实例） |
 | `./codex-input-unlock.sh verify` | 检查守护进程存活、CDP 连通性与断点就绪状态 |
 | `./codex-input-unlock.sh inspect` | 输出包含网络监听、进程与最近日志的详细诊断 JSON |
 | `./codex-input-unlock.sh uninstall` | 停止守护进程、移除应用程序图标与运行目录 |

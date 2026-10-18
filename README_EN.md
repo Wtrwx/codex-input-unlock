@@ -79,25 +79,28 @@ You must also sign in to your account in the desktop client before using the unl
 
 #### 1. Install
 
-In the repository directory, run:
+Clone the repository and run:
 
 ```bash
+git clone https://github.com/Wtrwx/codex-input-unlock.git
+cd codex-input-unlock
 chmod +x ./codex-input-unlock.sh
 ./codex-input-unlock.sh install
 ```
 
-*Installation copies runtime files to `~/Library/Application Support/OpenAI/CodexInputUnlock`, creates a **Codex Input Unlock.app** application in `~/Applications`, and installs a symlink to `~/.local/bin/codex-input-unlock`.*
+*Installation copies runtime files to `~/Library/Application Support/OpenAI/CodexInputUnlock`, creates a **Codex Input Unlock.app** application (using the official squircle icon) in `~/Applications`, and installs a symlink to `~/.local/bin/codex-input-unlock`.*
 
 #### 2. Launch
 
-> **Important:** Completely quit every running Codex Desktop or ChatGPT Desktop process before launching (via Cmd+Q). If either client is still running, the launcher will prompt you to quit it first.
-
-- **Option A (recommended):** Launch **`Codex Input Unlock`** from Spotlight or Applications.
+- **Option A (recommended):** Launch **`Codex Input Unlock`** from Spotlight or `~/Applications`.
+  - If the client is not running: launches the client with CDP debugging enabled and arms the unlock breakpoint.
+  - If the client is already running unlocked: brings the window to the front without erroring.
+  - If a normal (non-unlocked) client is running: prompts you to quit it (`Cmd+Q`) first.
 - **Option B (command line):**
   ```bash
   codex-input-unlock launch
-  # or directly:
-  "$HOME/Library/Application Support/OpenAI/CodexInputUnlock/codex-input-unlock.sh" launch
+  # Or force-restart a running client with unlock enabled:
+  codex-input-unlock launch --force
   ```
 
 #### 3. Verify
@@ -113,7 +116,7 @@ codex-input-unlock verify
 | Action | Description |
 | :--- | :--- |
 | `./codex-input-unlock.sh diagnose` | Checks runtime dependencies, app path, and files |
-| `./codex-input-unlock.sh launch` | Starts supervisor and launches client with debugging flags |
+| `./codex-input-unlock.sh launch [--force]` | Starts supervisor and launches client with debugging flags (`--force` restarts running instances) |
 | `./codex-input-unlock.sh verify` | Checks supervisor process, CDP connectivity, and breakpoint status |
 | `./codex-input-unlock.sh inspect` | Outputs diagnostic JSON with recent logs |
 | `./codex-input-unlock.sh uninstall` | Stops supervisor and removes app shortcut and files |
