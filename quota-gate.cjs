@@ -39,16 +39,33 @@
     return result;
   }
 
-  function locateLegacy(source, sourceUrl, atomVariable) {
-    const localGatePattern = new RegExp(
-      `(${identifier})=${identifier}\\(${escapeRegex(atomVariable)}\\)&&(?:(${identifier})===['"\`]local['"\`]|['"\`]local['"\`]===(${identifier}))`,
+  function buildConsumerPattern(atomVariable) {
+    const hostCheck = `(?:(${identifier})===['"\`]local['"\`]|['"\`]local['"\`]===(${identifier}))`;
+    const escapedAtom = escapeRegex(atomVariable);
+    return new RegExp(
+      `(${identifier})=${identifier}\\((?:` +
+        `(?:${hostCheck}&&${escapedAtom}|${escapedAtom}&&${hostCheck})\\)` +
+        `|` +
+        `${escapedAtom}\\)&&${hostCheck}` +
+      `)`,
       "g",
     );
+  }
+
+  function extractHost(match) {
+    for (let i = 2; i < match.length; i++) {
+      if (match[i]) return match[i];
+    }
+    return null;
+  }
+
+  function locateLegacy(source, sourceUrl, atomVariable) {
+    const localGatePattern = buildConsumerPattern(atomVariable);
     const localGates = [...source.matchAll(localGatePattern)];
     if (localGates.length !== 1) return null;
 
     const gate = localGates[0];
-    const host = gate[2] || gate[3];
+    const host = extractHost(gate);
     const tailOffset = gate.index + gate[0].length;
     const tail = source.slice(tailOffset, tailOffset + 18000);
     const assignment = new RegExp(
@@ -91,14 +108,11 @@
   }
 
   function locateCodexLocalQuota(source, sourceUrl, atomVariable) {
-    const consumerPattern = new RegExp(
-      `(${identifier})=${identifier}\\(${escapeRegex(atomVariable)}\\)&&(?:(${identifier})===['"\`]local['"\`]|['"\`]local['"\`]===(${identifier}))`,
-      "g",
-    );
+    const consumerPattern = buildConsumerPattern(atomVariable);
     const candidates = [];
     for (const consumer of source.matchAll(consumerPattern)) {
       const quota = consumer[1];
-      const host = consumer[2] || consumer[3];
+      const host = extractHost(consumer);
       const window = source.slice(consumer.index, consumer.index + 16000);
       const assignmentPattern = new RegExp(
         `(?:let|const|var)\\s+(${identifier})=([^,;]{1,900}?\\b${escapeRegex(quota)}\\b[^,;]{0,900}?)(?:,(${identifier}))?;`,
