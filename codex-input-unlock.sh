@@ -77,7 +77,7 @@ get_app_info() {
     exec_name="$(defaults read "${app_path}/Contents/Info.plist" CFBundleExecutable 2>/dev/null || echo "ChatGPT")"
   fi
   local version
-  version="$(defaults read "${app_path}/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "unknown")"
+  version="$(plutil -extract CFBundleShortVersionString raw -o - "${app_path}/Contents/Info.plist" 2>/dev/null || defaults read "${app_path}/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "unknown")"
   local bundle_id
   bundle_id="$(defaults read "${app_path}/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || echo "com.openai.chat")"
   local asar_path="${app_path}/Contents/Resources/app.asar"
@@ -170,7 +170,7 @@ action_diagnose() {
       try {
         const { execSync } = require("child_process");
         const execName = fs.existsSync(`${appPath}/Contents/MacOS/ChatGPT`) ? "ChatGPT" : "Codex";
-        const ver = execSync(`defaults read "${appPath}/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo unknown`, { encoding: "utf8" }).trim();
+        const ver = execSync(`plutil -extract CFBundleShortVersionString raw -o - "${appPath}/Contents/Info.plist" 2>/dev/null || defaults read "${appPath}/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo unknown`, { encoding: "utf8" }).trim();
         appInfo = {
           appPath,
           executable: `${appPath}/Contents/MacOS/${execName}`,
@@ -180,7 +180,10 @@ action_diagnose() {
       } catch {}
     }
     const installed = fs.existsSync(supervisor) && fs.existsSync(gate);
-    const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : null;
+    let state = null;
+    try {
+      if (fs.existsSync(statePath)) state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    } catch {}
     const diag = {
       platform: "darwin",
       app: appInfo,
@@ -559,24 +562,26 @@ action_inspect() {
 
     let logs = [];
     if (fs.existsSync(logDir)) {
-      const files = fs.readdirSync(logDir)
-        .map(f => {
-          const fp = path.join(logDir, f);
-          const stat = fs.statSync(fp);
-          return { name: f, path: fp, mtime: stat.mtimeMs, size: stat.size };
-        })
-        .sort((a, b) => b.mtime - a.mtime)
-        .slice(0, 4);
+      try {
+        const files = fs.readdirSync(logDir)
+          .map(f => {
+            const fp = path.join(logDir, f);
+            const stat = fs.statSync(fp);
+            return { name: f, path: fp, mtime: stat.mtimeMs, size: stat.size };
+          })
+          .sort((a, b) => b.mtime - a.mtime)
+          .slice(0, 4);
 
-      logs = files.map(f => {
-        const lines = fs.readFileSync(f.path, "utf8").split("\n").filter(Boolean);
-        return {
-          path: f.path,
-          size: f.size,
-          lastWriteTime: new Date(f.mtime).toISOString(),
-          tail: lines.slice(-40)
-        };
-      });
+        logs = files.map(f => {
+          const lines = fs.readFileSync(f.path, "utf8").split("\n").filter(Boolean);
+          return {
+            path: f.path,
+            size: f.size,
+            lastWriteTime: new Date(f.mtime).toISOString(),
+            tail: lines.slice(-40)
+          };
+        });
+      } catch {}
     }
 
     const report = {

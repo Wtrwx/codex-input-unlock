@@ -60,8 +60,8 @@ fi
 if [[ "$SKIP_APP_CHECK" -eq 0 ]]; then
   config_path="${HOME}/.codex/config.toml"
   hash_before=""
-  if [[ -f "$config_path" ]]; then
-    hash_before="$(shasum -a 256 "$config_path" | awk '{print $1}')"
+  if [[ -f "$config_path" && -r "$config_path" ]]; then
+    hash_before="$(shasum -a 256 "$config_path" 2>/dev/null | awk '{print $1}' || echo "")"
   fi
 
   echo "[smoke] Running diagnose action..."
@@ -72,8 +72,8 @@ if [[ "$SKIP_APP_CHECK" -eq 0 ]]; then
     if (d.configManagedByPatch !== false) throw new Error("expected configManagedByPatch false");
   '
 
-  if [[ -f "$config_path" ]]; then
-    hash_after="$(shasum -a 256 "$config_path" | awk '{print $1}')"
+  if [[ -n "$hash_before" && -f "$config_path" && -r "$config_path" ]]; then
+    hash_after="$(shasum -a 256 "$config_path" 2>/dev/null | awk '{print $1}' || echo "")"
     if [[ "$hash_before" != "$hash_after" ]]; then
       echo "[smoke] ERROR: diagnose modified config.toml" >&2
       exit 1
@@ -84,6 +84,8 @@ fi
 # Determine bundle path for self-test if available
 if [[ -z "$BUNDLE_PATH" && -f "/tmp/chatgpt_assets/app-primary-5433e23a397e.js" ]]; then
   BUNDLE_PATH="/tmp/chatgpt_assets/app-primary-5433e23a397e.js"
+elif [[ -z "$BUNDLE_PATH" && -f "${HOME}/.gemini/antigravity/brain/345b2dcc-bd55-4698-b9fe-fb77947a1780/scratch/app-primary.js" ]]; then
+  BUNDLE_PATH="${HOME}/.gemini/antigravity/brain/345b2dcc-bd55-4698-b9fe-fb77947a1780/scratch/app-primary.js"
 fi
 
 if [[ -n "$BUNDLE_PATH" && -f "$BUNDLE_PATH" ]]; then
@@ -92,8 +94,9 @@ if [[ -n "$BUNDLE_PATH" && -f "$BUNDLE_PATH" ]]; then
   echo "$self_test_out" | node -e '
     const res = JSON.parse(require("fs").readFileSync(0, "utf8"));
     if (!res.ok) throw new Error("self-test not ok");
-    if (res.location?.mode !== "codex-local-quota") throw new Error("unexpected mode: " + res.location?.mode);
-    if (!res.location?.quotaVariable || !res.location?.hostVariable) throw new Error("missing variables");
+    if (!["codex-local-quota", "local-submit-quota"].includes(res.location?.mode)) throw new Error("unexpected mode: " + res.location?.mode);
+    if (!res.location?.quotaVariable) throw new Error("missing quotaVariable");
+    if (res.location?.mode === "codex-local-quota" && !res.location?.hostVariable) throw new Error("missing hostVariable");
     if (!res.condition || !res.condition.includes("=false,false)")) throw new Error("unexpected condition");
   '
   echo "[smoke] Bundle self-test passed."

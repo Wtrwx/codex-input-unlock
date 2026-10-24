@@ -141,6 +141,36 @@
   }
 
   function locateLocalSubmit(source, sourceUrl, atomVariable) {
+    const broadPattern = new RegExp(
+      `(${identifier})\\s*=\\s*${identifier}\\s*\\([^()]{0,150}?\\b${escapeRegex(atomVariable)}\\b[^()]{0,150}?\\)(?:\\s*&&\\s*${identifier})?`,
+      "g",
+    );
+    const broadCandidates = [];
+    for (const consumer of source.matchAll(broadPattern)) {
+      const quotaVariable = consumer[1];
+      const tail = source.slice(consumer.index, consumer.index + 60000);
+      if (!tail.includes("submitDisabled:")) continue;
+      const quotaRef = new RegExp(`[\\b\\W]${escapeRegex(quotaVariable)}[\\b\\W]`);
+      const afterCall = tail.slice(consumer[0].length);
+      if (!quotaRef.test(afterCall)) continue;
+      const start = consumer.index;
+      const end = consumer.index + consumer[0].length + 1;
+      broadCandidates.push({ quotaVariable, start, end });
+    }
+    if (broadCandidates.length === 1) {
+      const candidate = broadCandidates[0];
+      return sourceLocation(
+        source,
+        sourceUrl,
+        candidate.start,
+        candidate.quotaVariable,
+        null,
+        "local-submit-quota",
+        null,
+        candidate.end,
+      );
+    }
+
     const consumerPattern = new RegExp(
       `(${identifier})=${identifier}\\((?:[^()]{0,200}?&&\\s*)?${escapeRegex(atomVariable)}\\)`,
       "g",
@@ -162,21 +192,23 @@
         if (equals < 0) continue;
         let start = equals + 1;
         while (start < source.length && /\s/.test(source[start])) start += 1;
-        candidates.push({ quotaVariable, start });
+        candidates.push({ quotaVariable, start, end: start + 1 });
       }
     }
-    if (candidates.length !== 1) return null;
-    const candidate = candidates[0];
-    return sourceLocation(
-      source,
-      sourceUrl,
-      candidate.start,
-      candidate.quotaVariable,
-      null,
-      "local-submit-quota",
-      null,
-      candidate.start + 1,
-    );
+    if (candidates.length === 1) {
+      const candidate = candidates[0];
+      return sourceLocation(
+        source,
+        sourceUrl,
+        candidate.start,
+        candidate.quotaVariable,
+        null,
+        "local-submit-quota",
+        null,
+        candidate.end,
+      );
+    }
+    return null;
   }
 
   function locate(source, sourceUrl) {

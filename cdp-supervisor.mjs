@@ -308,9 +308,6 @@ async function resolveBreakpointLocation(session, scriptId, desired) {
       })
       .sort((left, right) => left.lineNumber - right.lineNumber || left.columnNumber - right.columnNumber);
     if (candidates.length > 0) return candidates[0];
-    throw new Error(
-      `no executable breakpoint inside quota expression ${start.lineNumber}:${start.columnNumber}-${end.lineNumber}:${end.columnNumber}`,
-    );
   }
   for (const radius of [300, 2000]) {
     const start = {
